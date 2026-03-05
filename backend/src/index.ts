@@ -9,8 +9,13 @@ const app = express();
 const PORT = process.env.PORT ?? 3001;
 
 // ─── MIDDLEWARE ────────────────────────────────────────────────────────────────
-app.use(cors({ origin: "http://localhost:3000", credentials: true }));
-app.use(express.json({ limit: "2mb" }));
+app.use(cors({
+  origin: [
+    "http://localhost:3000",
+    "https://your-app-name.vercel.app",  // add after you get Vercel URL
+  ],
+  credentials: true
+}));
 
 // Request logging
 app.use((req, _res, next) => {

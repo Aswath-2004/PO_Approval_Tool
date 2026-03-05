@@ -2,28 +2,34 @@ import { z } from "zod";
 
 // ─── INPUT SCHEMA ──────────────────────────────────────────────────────────────
 export const POItemSchema = z.object({
-  lineNo: z.number().int().positive(),
-  itemId: z.number().int().positive(),
-  itemName: z.string().min(1),
-  categoryName: z.string().min(1),
-  uom: z.string().min(1),
-  Qty: z.number().positive(),
-  Rate: z.number().nonnegative(),
-  Amount: z.number().nonnegative(),
-  isBillable: z.boolean(),
-  isEstimated: z.boolean(),
-  isNonTendered: z.boolean(),
-  mrQty: z.number().nonnegative().nullable().optional(),
-  estimatedQty: z.number().positive().nullable(),
-  estimatedRate: z.number().nonnegative().nullable(),
-});
+  lineNo:          z.number().int().positive(),
+  itemId:          z.number().int().positive(),
+  itemName:        z.string().min(1),
+  categoryName:    z.string().min(1),
+  uom:             z.string().min(1),
+  Qty:             z.number().nonnegative(),
+  Rate:            z.number().nonnegative(),
+  Amount:          z.number().nonnegative(),
+  isBillable:      z.boolean(),
+  isEstimated:     z.boolean(),
+  isNonTendered:   z.boolean(),
+  // mrQty is present in some real PO exports — accept and ignore
+  mrQty:           z.number().nonnegative().nullable().optional(),
+  // estimatedQty / estimatedRate must be null when isEstimated = false
+  // Use .nonnegative() not .positive() so that 0 is a valid estimate
+  estimatedQty:    z.number().nonnegative().nullable(),
+  estimatedRate:   z.number().nonnegative().nullable(),
+})
+// passthrough lets any extra fields through without rejection
+// so real-world PO JSONs with additional columns won't break
+.passthrough();
 
 export const POSchema = z.object({
   poNumber: z.string().min(1),
-  vendor: z.string().optional(),
-  project: z.string().optional(),
-  items: z.array(POItemSchema).min(1, "PO must have at least one item"),
-});
+  vendor:   z.string().optional(),
+  project:  z.string().optional(),
+  items:    z.array(POItemSchema).min(1, "PO must have at least one item"),
+}).passthrough();
 
 // ─── INFERRED TYPES ────────────────────────────────────────────────────────────
 export type POItem = z.infer<typeof POItemSchema>;
@@ -39,10 +45,10 @@ export interface LineVariance {
   amount: number;
   estimatedQty: number | null;
   estimatedRate: number | null;
-  rateVariance: number | null;        // actual - estimated (per unit)
-  rateVarianceValue: number | null;   // variance × estimatedQty (pure rate effect)
-  qtyVariance: number | null;         // actual - estimated qty
-  qtyVarianceValue: number | null;    // qty variance × actual rate
+  rateVariance: number | null;
+  rateVarianceValue: number | null;
+  qtyVariance: number | null;
+  qtyVarianceValue: number | null;
   isEstimated: boolean;
   isNonTendered: boolean;
   isBillable: boolean;
@@ -54,22 +60,15 @@ export interface CategoryAnalysis {
   pctOfPO: number;
   billableValue: number;
   nonBillableValue: number;
-
-  // Rate variance (holding qty constant at estimated)
   rateSavings: number;
   rateOverspend: number;
-  netRateVariance: number;           // positive = overspend, negative = saving
-
-  // Quantity variance
-  qtyVarianceOverspend: number;      // extra cost due to qty > estimatedQty
-  qtyVarianceSaving: number;         // cost reduction due to qty < estimatedQty
-
-  // Risk flags
+  netRateVariance: number;
+  qtyVarianceOverspend: number;
+  qtyVarianceSaving: number;
   nonEstimatedValue: number;
   nonEstimatedItems: string[];
   nonTenderedValue: number;
   nonTenderedItems: string[];
-
   lines: LineVariance[];
 }
 
@@ -83,8 +82,8 @@ export interface VarianceSummary {
   totalNonTenderedValue: number;
   savingsPct: number;
   overspendPct: number;
-  netVariancePct: number;   // abs(rateOverspend + qtyOverspend - rateSavings) / totalValue
-  netVarianceValue: number; // rateOverspend + qtyOverspend - rateSavings (signed)
+  netVariancePct: number;
+  netVarianceValue: number;
   nonEstimatedPct: number;
   nonTenderedPct: number;
   qtyOverspendPct: number;
@@ -102,7 +101,7 @@ export interface POAnalysisResult {
   categories: CategoryAnalysis[];
   variance: VarianceSummary;
   riskFlags: RiskFlag[];
-  narrative: string; // AI-generated summary
+  narrative: string;
   computedAt: string;
 }
 

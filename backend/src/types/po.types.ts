@@ -1,27 +1,28 @@
 import { z } from "zod";
 
 // ─── INPUT SCHEMA ──────────────────────────────────────────────────────────────
+// Coerce strings to numbers where possible (handles "780" as well as 780)
+// All nullable fields accept null, undefined, or missing entirely
 export const POItemSchema = z.object({
-  lineNo:          z.number().int().positive(),
-  itemId:          z.number().int().positive(),
-  itemName:        z.string().min(1),
-  categoryName:    z.string().min(1),
-  uom:             z.string().min(1),
-  Qty:             z.number().nonnegative(),
-  Rate:            z.number().nonnegative(),
-  Amount:          z.number().nonnegative(),
-  isBillable:      z.boolean(),
-  isEstimated:     z.boolean(),
-  isNonTendered:   z.boolean(),
-  // mrQty is present in some real PO exports — accept and ignore
-  mrQty:           z.number().nonnegative().nullable().optional(),
-  // estimatedQty / estimatedRate must be null when isEstimated = false
-  // Use .nonnegative() not .positive() so that 0 is a valid estimate
-  estimatedQty:    z.number().nonnegative().nullable(),
-  estimatedRate:   z.number().nonnegative().nullable(),
+  lineNo:        z.coerce.number().int().positive(),
+  itemId:        z.coerce.number().int().positive(),
+  itemName:      z.string().min(1),
+  categoryName:  z.string().min(1),
+  uom:           z.string().min(1),
+  Qty:           z.coerce.number().nonnegative(),
+  Rate:          z.coerce.number().nonnegative(),
+  Amount:        z.coerce.number().nonnegative(),
+  isBillable:    z.boolean(),
+  isEstimated:   z.boolean(),
+  isNonTendered: z.boolean(),
+  // Optional fields — present in some PO exports, ignored in calculations
+  mrQty:         z.coerce.number().nonnegative().nullable().optional(),
+  // estimatedQty and estimatedRate must be null when isEstimated = false
+  // Accept null, undefined, or a number (coerced from string if needed)
+  estimatedQty:  z.union([z.coerce.number().nonnegative(), z.null()]).optional().transform(v => v ?? null),
+  estimatedRate: z.union([z.coerce.number().nonnegative(), z.null()]).optional().transform(v => v ?? null),
 })
-// passthrough lets any extra fields through without rejection
-// so real-world PO JSONs with additional columns won't break
+// Accept any extra fields without rejecting (real PO exports have many extra columns)
 .passthrough();
 
 export const POSchema = z.object({

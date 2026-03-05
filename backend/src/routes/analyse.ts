@@ -6,38 +6,33 @@ import logger from "../middleware/logger";
 
 const router = Router();
 
-/**
- * POST /api/analyse
- * Body: PurchaseOrder JSON
- * Query: ?includeNarrative=true  (default: false — keeps response <10ms)
- * Returns: POAnalysisResult
- *
- * Narrative is opt-in so the default path is instant (pure calculation).
- * The frontend calls this endpoint first with includeNarrative=false,
- * then the user can click "Generate Summary" which calls with includeNarrative=true.
- */
 router.post(
   "/analyse",
   async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     const startTime = Date.now();
 
     try {
-      // 1. Validate input with Zod
       const parseResult = POSchema.safeParse(req.body);
+
       if (!parseResult.success) {
+        // Return full Zod error details so you can see exactly which field failed
+        const details = parseResult.error.errors.map((e) => ({
+          field: e.path.join("."),
+          message: e.message,
+          received: (e as any).received,
+        }));
+        logger.warn({ details }, "Zod validation failed");
         res.status(400).json({
           error: "Invalid PO data",
-          details: parseResult.error.errors.map((e) => ({
-            field: e.path.join("."),
-            message: e.message,
-          })),
+          details,
+          // Also return raw body summary for debugging
+          receivedKeys: Object.keys(req.body || {}),
+          itemCount: Array.isArray(req.body?.items) ? req.body.items.length : "not an array",
         });
         return;
       }
 
       const po = parseResult.data;
-
-      // FIX 3 — narrative is opt-in. Default false keeps the endpoint fast.
       const includeNarrative = req.query.includeNarrative === "true";
 
       logger.info(
@@ -45,12 +40,10 @@ router.post(
         "Analysing PO"
       );
 
-      // 2. Run deterministic calculations — always fast (<5ms)
       const rawAnalysis = computePOAnalysisRaw(po);
       const calcTime = Date.now() - startTime;
       logger.debug({ calcTime }, "Calculations complete");
 
-      // 3. Narrative: only when explicitly requested
       let narrative = "";
       if (includeNarrative) {
         try {
@@ -61,14 +54,10 @@ router.post(
         }
       }
 
-      // 4. Assemble final result
       const result = computePOAnalysis(po, narrative);
 
       const totalTime = Date.now() - startTime;
-      logger.info(
-        { poNumber: po.poNumber, totalTime, calcTime, includeNarrative },
-        "Analysis complete"
-      );
+      logger.info({ poNumber: po.poNumber, totalTime, calcTime }, "Analysis complete");
 
       res.json(result);
     } catch (err) {
@@ -77,23 +66,20 @@ router.post(
   }
 );
 
-/**
- * GET /api/health
- */
 router.get("/health", (_req: Request, res: Response) => {
   res.json({ status: "ok", ts: new Date().toISOString() });
 });
 
-// ─── FALLBACK NARRATIVE ────────────────────────────────────────────────────────
+// Root route — confirms API is alive
+router.get("/", (_req: Request, res: Response) => {
+  res.json({ service: "PO Approval API", status: "ok", version: "1.0.0" });
+});
+
 function buildFallbackNarrative(raw: ReturnType<typeof computePOAnalysisRaw>): string {
   const inr = (n: number) => "₹" + Math.round(n).toLocaleString("en-IN");
-  const lines: string[] = [
-    `PO ${raw.poNumber} totals ${inr(raw.totalValue)}.`,
-  ];
-
+  const lines: string[] = [`PO ${raw.poNumber} totals ${inr(raw.totalValue)}.`];
   const criticals = raw.riskFlags.filter((f) => f.severity === "critical");
-  const warnings = raw.riskFlags.filter((f) => f.severity === "warning");
-
+  const warnings  = raw.riskFlags.filter((f) => f.severity === "warning");
   if (criticals.length > 0) {
     lines.push("Critical risks:");
     for (const f of criticals) lines.push(`• ${f.message} — ${inr(f.value)}`);
@@ -105,7 +91,6 @@ function buildFallbackNarrative(raw: ReturnType<typeof computePOAnalysisRaw>): s
   if (raw.variance.totalRateSavings > 0) {
     lines.push(`Rate savings identified: ${inr(raw.variance.totalRateSavings)}.`);
   }
-
   return lines.join("\n");
 }
 

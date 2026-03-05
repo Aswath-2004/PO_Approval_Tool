@@ -12,7 +12,7 @@ const PORT = process.env.PORT ?? 3001;
 app.use(cors({
   origin: [
     "http://localhost:3000",
-    "https://your-app-name.vercel.app",  // add after you get Vercel URL
+    "https://po-approval-tool.vercel.app/",  // add after you get Vercel URL
   ],
   credentials: true
 }));

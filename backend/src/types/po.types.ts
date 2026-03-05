@@ -1,39 +1,54 @@
 import { z } from "zod";
 
+// Helper: accepts number | string-that-parses-to-number | null | undefined
+const maybeNum = z.union([
+  z.number(),
+  z.string().transform((s) => parseFloat(s)),
+  z.null(),
+  z.undefined(),
+]).transform((v) => (v == null || (typeof v === "number" && isNaN(v)) ? null : Number(v)));
+
+const reqNum = z.union([
+  z.number(),
+  z.string().transform((s) => parseFloat(s)),
+]).transform((v) => Number(v));
+
+const reqBool = z.union([
+  z.boolean(),
+  z.string().transform((s) => s === "true" || s === "1"),
+  z.number().transform((n) => n !== 0),
+]);
+
 // ─── INPUT SCHEMA ──────────────────────────────────────────────────────────────
-// Coerce strings to numbers where possible (handles "780" as well as 780)
-// All nullable fields accept null, undefined, or missing entirely
 export const POItemSchema = z.object({
-  lineNo:        z.coerce.number().int().positive(),
-  itemId:        z.coerce.number().int().positive(),
+  lineNo:        reqNum,
+  itemId:        reqNum,
   itemName:      z.string().min(1),
   categoryName:  z.string().min(1),
   uom:           z.string().min(1),
-  Qty:           z.coerce.number().nonnegative(),
-  Rate:          z.coerce.number().nonnegative(),
-  Amount:        z.coerce.number().nonnegative(),
-  isBillable:    z.boolean(),
-  isEstimated:   z.boolean(),
-  isNonTendered: z.boolean(),
-  // Optional fields — present in some PO exports, ignored in calculations
-  mrQty:         z.coerce.number().nonnegative().nullable().optional(),
-  // estimatedQty and estimatedRate must be null when isEstimated = false
-  // Accept null, undefined, or a number (coerced from string if needed)
-  estimatedQty:  z.union([z.coerce.number().nonnegative(), z.null()]).optional().transform(v => v ?? null),
-  estimatedRate: z.union([z.coerce.number().nonnegative(), z.null()]).optional().transform(v => v ?? null),
-})
-// Accept any extra fields without rejecting (real PO exports have many extra columns)
-.passthrough();
+  Qty:           reqNum,
+  Rate:          reqNum,
+  Amount:        reqNum,
+  isBillable:    reqBool,
+  isEstimated:   reqBool,
+  isNonTendered: reqBool,
+  mrQty:         maybeNum.optional(),
+  estimatedQty:  maybeNum,
+  estimatedRate: maybeNum,
+}).passthrough();
 
 export const POSchema = z.object({
   poNumber: z.string().min(1),
   vendor:   z.string().optional(),
   project:  z.string().optional(),
-  items:    z.array(POItemSchema).min(1, "PO must have at least one item"),
+  items:    z.array(POItemSchema).min(1),
 }).passthrough();
 
 // ─── INFERRED TYPES ────────────────────────────────────────────────────────────
-export type POItem = z.infer<typeof POItemSchema>;
+export type POItem = z.infer<typeof POItemSchema> & {
+  estimatedQty: number | null;
+  estimatedRate: number | null;
+};
 export type PurchaseOrder = z.infer<typeof POSchema>;
 
 // ─── OUTPUT TYPES ──────────────────────────────────────────────────────────────

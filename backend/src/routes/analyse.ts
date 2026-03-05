@@ -10,55 +10,43 @@ router.post(
   "/analyse",
   async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     const startTime = Date.now();
-
     try {
       const parseResult = POSchema.safeParse(req.body);
 
       if (!parseResult.success) {
-        // Return full Zod error details so you can see exactly which field failed
         const details = parseResult.error.errors.map((e) => ({
           field: e.path.join("."),
           message: e.message,
-          received: (e as any).received,
+          code: e.code,
         }));
-        logger.warn({ details }, "Zod validation failed");
+        logger.warn({ details, body: JSON.stringify(req.body).slice(0, 500) }, "Validation failed");
         res.status(400).json({
           error: "Invalid PO data",
           details,
-          // Also return raw body summary for debugging
-          receivedKeys: Object.keys(req.body || {}),
-          itemCount: Array.isArray(req.body?.items) ? req.body.items.length : "not an array",
+          hint: "Check that all required fields are present. estimatedQty and estimatedRate can be null for non-estimated items.",
         });
         return;
       }
 
       const po = parseResult.data;
       const includeNarrative = req.query.includeNarrative === "true";
-
-      logger.info(
-        { poNumber: po.poNumber, itemCount: po.items.length, includeNarrative },
-        "Analysing PO"
-      );
+      logger.info({ poNumber: po.poNumber, itemCount: po.items.length, includeNarrative }, "Analysing PO");
 
       const rawAnalysis = computePOAnalysisRaw(po);
-      const calcTime = Date.now() - startTime;
-      logger.debug({ calcTime }, "Calculations complete");
+      logger.debug({ calcTime: Date.now() - startTime }, "Calculations complete");
 
       let narrative = "";
       if (includeNarrative) {
         try {
           narrative = await generateNarrative(rawAnalysis);
         } catch (aiErr) {
-          logger.warn({ aiErr }, "AI narrative generation failed, using fallback");
+          logger.warn({ aiErr }, "AI narrative failed, using fallback");
           narrative = buildFallbackNarrative(rawAnalysis);
         }
       }
 
       const result = computePOAnalysis(po, narrative);
-
-      const totalTime = Date.now() - startTime;
-      logger.info({ poNumber: po.poNumber, totalTime, calcTime }, "Analysis complete");
-
+      logger.info({ poNumber: po.poNumber, totalTime: Date.now() - startTime }, "Done");
       res.json(result);
     } catch (err) {
       next(err);
@@ -66,31 +54,19 @@ router.post(
   }
 );
 
-router.get("/health", (_req: Request, res: Response) => {
+router.get("/health", (_req, res) => {
   res.json({ status: "ok", ts: new Date().toISOString() });
 });
 
-// Root route — confirms API is alive
-router.get("/", (_req: Request, res: Response) => {
+router.get("/", (_req, res) => {
   res.json({ service: "PO Approval API", status: "ok", version: "1.0.0" });
 });
 
 function buildFallbackNarrative(raw: ReturnType<typeof computePOAnalysisRaw>): string {
   const inr = (n: number) => "₹" + Math.round(n).toLocaleString("en-IN");
-  const lines: string[] = [`PO ${raw.poNumber} totals ${inr(raw.totalValue)}.`];
-  const criticals = raw.riskFlags.filter((f) => f.severity === "critical");
-  const warnings  = raw.riskFlags.filter((f) => f.severity === "warning");
-  if (criticals.length > 0) {
-    lines.push("Critical risks:");
-    for (const f of criticals) lines.push(`• ${f.message} — ${inr(f.value)}`);
-  }
-  if (warnings.length > 0) {
-    lines.push("Warnings:");
-    for (const f of warnings) lines.push(`• ${f.message} — ${inr(f.value)}`);
-  }
-  if (raw.variance.totalRateSavings > 0) {
-    lines.push(`Rate savings identified: ${inr(raw.variance.totalRateSavings)}.`);
-  }
+  const lines = [`PO ${raw.poNumber} totals ${inr(raw.totalValue)}.`];
+  for (const f of raw.riskFlags.filter(f => f.severity !== "info"))
+    lines.push(`• ${f.message} — ${inr(f.value)}`);
   return lines.join("\n");
 }
 
